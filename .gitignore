@@ -1,0 +1,11 @@
+# Node
+node_modules/
+dist/
+*.tsbuildinfo
+.npm/
+
+# OS / editors
+.DS_Store
+.idea/
+.vscode/
+*.log
