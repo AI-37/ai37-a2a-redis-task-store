@@ -1,5 +1,75 @@
 # @ai37/a2a-redis-task-store
 
+<!-- ai37:card:start (managed by doc-bot — do not edit inside) -->
+# ai37-a2a-redis-task-store
+
+## Описание
+Приватная npm-библиотека `@ai37/a2a-redis-task-store` — Redis-реализация `TaskStore` для A2A-протокола (`@a2a-js/sdk`). Хранит долговечные (durable) снапшоты `Task` для multi-turn/HITL-сценариев, resubscribe и replay, выступая drop-in заменой in-memory `TaskStore` из SDK.
+
+## Стек
+TypeScript (ESM + CJS, сборка через tsup), `ioredis`; peer-зависимость `@a2a-js/sdk >=0.3.0` (в dev `^0.3.13`). Менеджер пакетов — npm; тесты — Vitest.
+
+## Схема работы
+Класс `RedisTaskStore` реализует контракт `TaskStore` из `@a2a-js/sdk`.
+- `save(task)` — сериализует `Task` в JSON и пишет по ключу `keyPrefix + task.id` с TTL (`SET ... EX`); при `ttlSeconds=0` пишет без `EX` (вечные ключи).
+- `load(taskId)` — читает ключ; при отсутствии ключа или повреждённом JSON возвращает `undefined` (warn, а не исключение).
+- `delete`/`close` — вне контракта `TaskStore`, но публичны; `close()` закрывает только собственный `ioredis` (созданный из `url`) и ничего не делает для инжектированного `client`.
+
+## Структура каталогов
+- `src/` — исходники библиотеки: `index.ts` (публичный barrel), `redis-task-store.ts` (реализация `RedisTaskStore`).
+- `test/` — unit-тесты на in-memory fake ioredis (`redis-task-store.test.ts`, `RedisLike`); живой Redis не нужен.
+- `.github/workflows/` — `ci.yml` (PR-CI: `npm ci` + `npm run verify`) и `publish.yml` (публикация пакета).
+- `tsup.config.ts`, `tsconfig.json`, `package.json` — конфигурация сборки и публикации.
+
+## Публичные интерфейсы
+- npm-пакет: `@ai37/a2a-redis-task-store`.
+- API класса `RedisTaskStore` (реализует `TaskStore`): `save(task)`, `load(taskId)`, `delete`, `close`.
+- Опции конструктора (`RedisTaskStoreOptions`): `url`, `client`, `keyPrefix`, `ttlSeconds`.
+- HTTP/REST-эндпоинтов, A2A Agent Card, MCP, AG-UI и CLI нет — это библиотека, а не сервис.
+
+## Зависимости в экосистеме
+### Зависит от
+- `@a2a-js/sdk` (peerDependency `>=0.3.0`) — типы `Task`/`TaskStore`.
+- `ioredis` — клиент Redis.
+- Node.js — рантайм для сборки/тестов; для unit-тестов достаточно in-memory fake.
+
+### От него зависят
+- Потребители пакета, в первую очередь agent-host (контракт `save`/`load`), подключающие библиотеку по версии из приватного Verdaccio. Точный список потребителей в предоставленных материалах не зафиксирован.
+
+## Конфигурация
+Параметры задаются через `RedisTaskStoreOptions` (отдельного `.env` в материалах нет):
+- `url` — строка подключения Redis: store сам создаёт `ioredis` и закрывает его в `close()`.
+- `client` — инжектированный внешний `ioredis`; `close()` становится no-op.
+- `keyPrefix` — префикс ключей, по умолчанию `a2a:task:`.
+- `ttlSeconds` — TTL при `SET ... EX`, по умолчанию `86400` (24 часа); `0` — запись без TTL.
+
+## Данные и хранилища
+- Redis: снапшоты `Task`, ключ `keyPrefix + task.id`, TTL по умолчанию 24 часа (защита от OOM).
+- Миграции и отдельные БД отсутствуют.
+
+## Быстрый старт (локально)
+```bash
+npm ci
+npm run verify
+```
+`npm run verify` выполняет `tsc --noEmit` + `vitest run` + `tsup build`. Health/smoke-эндпоинтов нет; unit-тесты работают на in-memory fake ioredis без живого Redis.
+
+## Как запускать тесты
+```bash
+npm test        # = vitest run
+npm run verify  # полная проверка: tsc --noEmit + vitest run + tsup build
+```
+
+## Деплой
+Публикация пакета в приватный Verdaccio `npm.app.sp-ai.ru` через `.github/workflows/publish.yml`; потребители подключают его по версии. CI: GitHub Actions `.github/workflows/ci.yml` — на каждый PR выполняются `npm ci` и `npm run verify`, плюс агрегатный гейт `ci-green` с единым именем.
+
+## Связанные документы
+- `ecosystem/v2.2/04-state-storage-postgres.md` — текущее место Redis-task-store и стратегия добавления PostgreSQL-реализации.
+- `ecosystem/v2.2/02-agent-host-unification.md` — durable-состояние в `task.metadata` и семантика `save`/`load`.
+- `ecosystem/v2/04-a2a-conventions.md` — контракт `Task`/`status`/`contextId`.
+- `docs/plans/doc-bot-pr-review.md` — общий CI/ревью-контракт.
+<!-- ai37:card:end -->
+
 A Redis-backed [`TaskStore`](https://github.com/a2aproject/a2a-js) for the **A2A** protocol
 (`@a2a-js/sdk`). `Task` snapshots are stored in Redis (with a TTL) and survive **restarts and
 replicas** — required for multi-turn flows (HITL), resubscribe and replay. A drop-in replacement for
