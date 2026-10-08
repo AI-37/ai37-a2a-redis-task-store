@@ -18,7 +18,7 @@ TypeScript (ESM + CJS, сборка через tsup), `ioredis`; peer-завис
 ## Структура каталогов
 - `src/` — исходники библиотеки: `index.ts` (публичный barrel), `redis-task-store.ts` (реализация `RedisTaskStore`).
 - `test/` — unit-тесты на in-memory fake ioredis (`redis-task-store.test.ts`, `RedisLike`); живой Redis не нужен.
-- `.github/workflows/` — `ci.yml` (PR-CI: `npm ci` + `npm run verify`) и `publish.yml` (публикация пакета).
+- `.github/workflows/` — `ci.yml` (PR-CI: `npm ci` + `npm run verify`, выбор раннера по канону AI-37) и `publish.yml` (публикация пакета).
 - `tsup.config.ts`, `tsconfig.json`, `package.json` — конфигурация сборки и публикации.
 
 ## Публичные интерфейсы
@@ -43,6 +43,10 @@ TypeScript (ESM + CJS, сборка через tsup), `ioredis`; peer-завис
 - `keyPrefix` — префикс ключей, по умолчанию `a2a:task:`.
 - `ttlSeconds` — TTL при `SET ... EX`, по умолчанию `86400` (24 часа); `0` — запись без TTL.
 
+Переменные окружения CI (GitHub Actions, переменные организации):
+- `CI_RUNNER` — JSON-массив меток раннера для CI-работ (напр. `["self-hosted","ai37-local-1"]`); если не задана, используется `ubuntu-latest`.
+- `CD_RUNNER` — аналогичный выбор раннера для деплой-workflow (канон AI-37).
+
 ## Данные и хранилища
 - Redis: снапшоты `Task`, ключ `keyPrefix + task.id`, TTL по умолчанию 24 часа (защита от OOM).
 - Миграции и отдельные БД отсутствуют.
@@ -61,7 +65,11 @@ npm run verify  # полная проверка: tsc --noEmit + vitest run + tsu
 ```
 
 ## Деплой
-Публикация пакета в приватный Verdaccio `npm.app.sp-ai.ru` через `.github/workflows/publish.yml`; потребители подключают его по версии. CI: GitHub Actions `.github/workflows/ci.yml` — на каждый PR выполняются `npm ci` и `npm run verify`, плюс агрегатный гейт `ci-green` с единым именем.
+Публикация npm-пакета в приватный Verdaccio `npm.app-sp-ai.ru` через `.github/workflows/publish.yml` (раннер деплоя выбирается переменной `CD_RUNNER` — канон AI-37); потребители подключают пакет по версии. CI: GitHub Actions `.github/workflows/ci.yml` — на каждый PR выполняются `npm ci` и `npm run verify`, затем агрегатный гейт `ci-green` с единым именем.
+
+Выбор раннера (канон AI-37, применяется к джобам `verify` и `ci-green`):
+- автозапуск (PR) и режим `auto` при ручном запуске → переменная организации `CI_RUNNER` (JSON-массив меток, напр. `["self-hosted","ai37-local-1"]`), при её отсутствии — `ubuntu-latest`;
+- ручной запуск (`workflow_dispatch`) позволяет явно выбрать вход `runner`: `auto`, `ubuntu-latest` или `ai37-self-hosted`.
 
 ## Связанные документы
 - `ecosystem/v2.2/04-state-storage-postgres.md` — текущее место Redis-task-store и стратегия добавления PostgreSQL-реализации.
