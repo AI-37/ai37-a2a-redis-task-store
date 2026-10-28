@@ -15,10 +15,18 @@ TypeScript (ESM + CJS, сборка через tsup), `ioredis`; peer-завис
 - `load(taskId)` — читает ключ; при отсутствии ключа или повреждённом JSON возвращает `undefined` (warn, а не исключение).
 - `delete`/`close` — вне контракта `TaskStore`, но публичны; `close()` закрывает только собственный `ioredis` (созданный из `url`) и ничего не делает для инжектированного `client`.
 
+```mermaid
+flowchart LR
+  A[Agent / A2A runtime] -->|save(task)| S[RedisTaskStore]
+  A -->|load(taskId)| S
+  S -->|SET keyPrefix+id EX ttl| R[(Redis)]
+  S -->|GET keyPrefix+id| R
+```
+
 ## Структура каталогов
 - `src/` — исходники библиотеки: `index.ts` (публичный barrel), `redis-task-store.ts` (реализация `RedisTaskStore`).
 - `test/` — unit-тесты на in-memory fake ioredis (`redis-task-store.test.ts`, `RedisLike`); живой Redis не нужен.
-- `.github/workflows/` — `ci.yml` (PR-CI: `npm ci` + `npm run verify`, выбор раннера по канону AI-37) и `publish.yml` (публикация пакета).
+- `.github/workflows/` — `ci.yml` (PR-CI: одна джоба `ci-green` = `npm ci` + `npm run verify`, выбор раннера по канону AI-37) и `publish.yml` (публикация пакета).
 - `tsup.config.ts`, `tsconfig.json`, `package.json` — конфигурация сборки и публикации.
 
 ## Публичные интерфейсы
@@ -31,7 +39,7 @@ TypeScript (ESM + CJS, сборка через tsup), `ioredis`; peer-завис
 ### Зависит от
 - `@a2a-js/sdk` (peerDependency `>=0.3.0`) — типы `Task`/`TaskStore`.
 - `ioredis` — клиент Redis.
-- Node.js — рантайм для сборки/тестов; для unit-тестов достаточно in-memory fake.
+- Node.js 22 — рантайм для сборки/тестов (версия в CI); для unit-тестов достаточно in-memory fake.
 
 ### От него зависят
 - Потребители пакета, в первую очередь agent-host (контракт `save`/`load`), подключающие библиотеку по версии из приватного Verdaccio. Точный список потребителей в предоставленных материалах не зафиксирован.
@@ -44,7 +52,7 @@ TypeScript (ESM + CJS, сборка через tsup), `ioredis`; peer-завис
 - `ttlSeconds` — TTL при `SET ... EX`, по умолчанию `86400` (24 часа); `0` — запись без TTL.
 
 Переменные окружения CI (GitHub Actions, переменные организации):
-- `CI_RUNNER` — JSON-массив меток раннера для CI-работ (напр. `["self-hosted","ai37-local-1"]`); если не задана, используется `ubuntu-latest`.
+- `CI_RUNNER` — JSON-массив меток раннера для CI-джобы `ci-green` (напр. `["self-hosted","ai37-local-1"]`); если не задана, используется `ubuntu-latest`.
 - `CD_RUNNER` — аналогичный выбор раннера для деплой-workflow (канон AI-37).
 
 ## Данные и хранилища
@@ -65,17 +73,19 @@ npm run verify  # полная проверка: tsc --noEmit + vitest run + tsu
 ```
 
 ## Деплой
-Публикация npm-пакета в приватный Verdaccio `npm.app-sp-ai.ru` через `.github/workflows/publish.yml` (раннер деплоя выбирается переменной `CD_RUNNER` — канон AI-37); потребители подключают пакет по версии. CI: GitHub Actions `.github/workflows/ci.yml` — на каждый PR выполняются `npm ci` и `npm run verify`, затем агрегатный гейт `ci-green` с единым именем.
+Публикация npm-пакета в приватный Verdaccio `npm.app-sp-ai.ru` через `.github/workflows/publish.yml` (раннер деплоя выбирается переменной `CD_RUNNER` — канон AI-37); потребители подключают пакет по версии.
 
-Выбор раннера (канон AI-37, применяется к джобам `verify` и `ci-green`):
+CI: GitHub Actions `.github/workflows/ci.yml` — на каждый PR (и на `workflow_dispatch`) выполняется ОДНА джоба `ci-green` (агрегатора больше нет): `actions/checkout@v4` → `actions/setup-node@v4` (Node 22, кэш npm) → `npm ci` → `npm run verify`. Имя `ci-green` единое для всех репозиториев AI-37 и является обязательной проверкой ruleset. Права — `contents: read`; `concurrency` с `cancel-in-progress: true` по группе `ai37-a2a-redis-task-store-ci-<PR|ref>`.
+
+Выбор раннера (канон AI-37, применяется к джобе `ci-green`):
 - автозапуск (PR) и режим `auto` при ручном запуске → переменная организации `CI_RUNNER` (JSON-массив меток, напр. `["self-hosted","ai37-local-1"]`), при её отсутствии — `ubuntu-latest`;
-- ручной запуск (`workflow_dispatch`) позволяет явно выбрать вход `runner`: `auto`, `ubuntu-latest` или `ai37-self-hosted`.
+- ручной запуск (`workflow_dispatch`) позволяет явно выбрать вход `runner`: `auto`, `ubuntu-latest` или `ai37-self-hosted` (в последнем случае — `["self-hosted","ai37-local-1"]`).
 
 ## Связанные документы
 - `ecosystem/v2.2/04-state-storage-postgres.md` — текущее место Redis-task-store и стратегия добавления PostgreSQL-реализации.
 - `ecosystem/v2.2/02-agent-host-unification.md` — durable-состояние в `task.metadata` и семантика `save`/`load`.
 - `ecosystem/v2/04-a2a-conventions.md` — контракт `Task`/`status`/`contextId`.
-- `docs/plans/doc-bot-pr-review.md` — общий CI/ревью-контракт.
+- `docs/plans/doc-bot-pr-review.md` — общий CI/ревью-контракт (единое имя обязательной проверки `ci-green`).
 <!-- ai37:card:end -->
 
 A Redis-backed [`TaskStore`](https://github.com/a2aproject/a2a-js) for the **A2A** protocol
