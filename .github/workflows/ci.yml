@@ -25,7 +25,11 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  verify:
+  # Одна джоба: раннер подбирает прогон один раз, и PR разблокируется сразу после последнего шага.
+  # Отдельный агрегатор вставал на единственном self-hosted раннере в очередь за чужими джобами и
+  # держал PR красным уже после зелёных проверок. Имя ci-green — единое для всех репозиториев AI-37
+  # и обязательная проверка ruleset (docs/plans/doc-bot-pr-review.md).
+  ci-green:
     runs-on: ${{ inputs.runner == 'ai37-self-hosted' && fromJSON('["self-hosted", "ai37-local-1"]') || inputs.runner == 'ubuntu-latest' && 'ubuntu-latest' || vars.CI_RUNNER && fromJSON(vars.CI_RUNNER) || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v4
@@ -35,14 +39,3 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run verify
-
-  # Aggregate "green" check with a UNIFORM name across all AI-37 repos (see docs/plans/doc-bot-pr-review.md).
-  ci-green:
-    if: always()
-    needs: [verify]
-    runs-on: ${{ inputs.runner == 'ai37-self-hosted' && fromJSON('["self-hosted", "ai37-local-1"]') || inputs.runner == 'ubuntu-latest' && 'ubuntu-latest' || vars.CI_RUNNER && fromJSON(vars.CI_RUNNER) || 'ubuntu-latest' }}
-    steps:
-      - name: gate
-        if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')
-        run: |
-          echo "one or more required CI jobs did not succeed"; exit 1
