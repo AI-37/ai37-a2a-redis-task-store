@@ -32,10 +32,11 @@ jobs:
   ci-green:
     runs-on: ${{ inputs.runner == 'ai37-self-hosted' && fromJSON('["self-hosted", "ai37-local-1"]') || inputs.runner == 'ubuntu-latest' && 'ubuntu-latest' || vars.CI_RUNNER && fromJSON(vars.CI_RUNNER) || 'ubuntu-latest' }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
+          package-manager-cache: ${{ runner.environment != 'self-hosted' }}
           cache: npm
       - run: npm ci
       - run: npm run verify
