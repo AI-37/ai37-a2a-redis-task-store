@@ -7,7 +7,7 @@
 Приватная npm-библиотека `@ai37/a2a-redis-task-store` — Redis-реализация `TaskStore` для A2A-протокола (`@a2a-js/sdk`). Хранит долговечные (durable) снапшоты `Task` для multi-turn/HITL-сценариев, resubscribe и replay, выступая drop-in заменой in-memory `TaskStore` из SDK.
 
 ## Стек
-TypeScript (ESM + CJS, сборка через tsup), `ioredis`; peer-зависимость `@a2a-js/sdk >=0.3.0` (в dev `^0.3.13`). Менеджер пакетов — npm; тесты — Vitest.
+TypeScript (ESM + CJS, сборка через tsup), `ioredis`; peer-зависимость `@a2a-js/sdk >=0.3.0` (в dev `^0.3.13`). Менеджер пакетов — npm; тесты — Vitest. Целевой рантайм сборки/тестов — Node.js 22 (версия в CI); сами GitHub-экшены в workflow — мажоров `@v5` (их внутренний рантайм — Node 24).
 
 ## Схема работы
 Класс `RedisTaskStore` реализует контракт `TaskStore` из `@a2a-js/sdk`.
@@ -75,7 +75,9 @@ npm run verify  # полная проверка: tsc --noEmit + vitest run + tsu
 ## Деплой
 Публикация npm-пакета в приватный Verdaccio `npm.app-sp-ai.ru` через `.github/workflows/publish.yml` (раннер деплоя выбирается переменной `CD_RUNNER` — канон AI-37); потребители подключают пакет по версии.
 
-CI: GitHub Actions `.github/workflows/ci.yml` — на каждый PR (и на `workflow_dispatch`) выполняется ОДНА джоба `ci-green` (агрегатора больше нет): `actions/checkout@v4` → `actions/setup-node@v4` (Node 22, кэш npm) → `npm ci` → `npm run verify`. Имя `ci-green` единое для всех репозиториев AI-37 и является обязательной проверкой ruleset. Права — `contents: read`; `concurrency` с `cancel-in-progress: true` по группе `ai37-a2a-redis-task-store-ci-<PR|ref>`.
+CI: GitHub Actions `.github/workflows/ci.yml` — на каждый PR (и на `workflow_dispatch`) выполняется ОДНА джоба `ci-green` (агрегатора больше нет): `actions/checkout@v5` → `actions/setup-node@v5` (Node 22) → `npm ci` → `npm run verify`. Имя `ci-green` единое для всех репозиториев AI-37 и является обязательной проверкой ruleset. Права — `contents: read`; `concurrency` с `cancel-in-progress: true` по группе `ai37-a2a-redis-task-store-ci-<PR|ref>`.
+
+Кэш npm — только на GitHub-hosted раннерах: в `setup-node` передаётся `package-manager-cache: ${{ runner.environment != 'self-hosted' }}` и `cache: 'npm'` лишь при `runner.environment != 'self-hosted'` (на self-hosted `cache` пустой). Причина — на self-hosted `~/.npm` и так переживает прогоны, а выгрузка кэша в post-step занимала ~85 с и могла висеть до таймаута джобы.
 
 Выбор раннера (канон AI-37, применяется к джобе `ci-green`):
 - автозапуск (PR) и режим `auto` при ручном запуске → переменная организации `CI_RUNNER` (JSON-массив меток, напр. `["self-hosted","ai37-local-1"]`), при её отсутствии — `ubuntu-latest`;
