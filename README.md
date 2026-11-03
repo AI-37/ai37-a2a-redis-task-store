@@ -4,16 +4,16 @@
 # ai37-a2a-redis-task-store
 
 ## Описание
-Приватная npm-библиотека `@ai37/a2a-redis-task-store` — Redis-реализация `TaskStore` для A2A-протокола (`@a2a-js/sdk`). Хранит долговечные (durable) снапшоты `Task` для multi-turn/HITL-сценариев, resubscribe и replay, выступая drop-in заменой in-memory `TaskStore` из SDK.
+Приватная npm-библиотека `@ai37/a2a-redis-task-store` — Redis-реализация `TaskStore` для A2A-протокола (`@a2a-js/sdk`). Хранит долговечные (durable) снапшоты `Task` в Redis с TTL: они переживают рестарты и реплики, что нужно для multi-turn/HITL-сценариев, resubscribe и replay. Drop-in замена in-memory `TaskStore` из SDK.
 
 ## Стек
 TypeScript (ESM + CJS, сборка через tsup), `ioredis`; peer-зависимость `@a2a-js/sdk >=0.3.0` (в dev `^0.3.13`). Менеджер пакетов — npm; тесты — Vitest. Целевой рантайм сборки/тестов — Node.js 22 (версия в CI); сами GitHub-экшены в workflow — мажоров `@v5` (их внутренний рантайм — Node 24).
 
 ## Схема работы
-Класс `RedisTaskStore` реализует контракт `TaskStore` из `@a2a-js/sdk`.
+Класс `RedisTaskStore` реализует контракт `TaskStore` из `@a2a-js/sdk`; его передают в A2A request handler (напр. `DefaultRequestHandler(agentCard, taskStore, executor)`) вместо in-memory store.
 - `save(task)` — сериализует `Task` в JSON и пишет по ключу `keyPrefix + task.id` с TTL (`SET ... EX`); при `ttlSeconds=0` пишет без `EX` (вечные ключи).
-- `load(taskId)` — читает ключ; при отсутствии ключа или повреждённом JSON возвращает `undefined` (warn, а не исключение).
-- `delete`/`close` — вне контракта `TaskStore`, но публичны; `close()` закрывает только собственный `ioredis` (созданный из `url`) и ничего не делает для инжектированного `client`.
+- `load(taskId)` — читает ключ; при отсутствии ключа или повреждённом JSON возвращает `undefined` (warn через `logger`, а не исключение).
+- `delete(taskId)`/`close()` — вне контракта `TaskStore`, но публичны; `close()` закрывает только собственный `ioredis` (созданный из `url`) и ничего не делает для инжектированного `client`.
 
 ```mermaid
 flowchart LR
@@ -28,18 +28,19 @@ flowchart LR
 - `test/` — unit-тесты на in-memory fake ioredis (`redis-task-store.test.ts`, `RedisLike`); живой Redis не нужен.
 - `.github/workflows/` — `ci.yml` (PR-CI: одна джоба `ci-green` = `npm ci` + `npm run verify`, выбор раннера по канону AI-37) и `publish.yml` (публикация пакета).
 - `REVIEW.md` — repo-specific оверлей для doc-bot PR-ревьюера: роль/стек/деплой, команды тестов, ключевые инварианты (контракт `save`/`load`, схема ключа, TTL/`EX`, владение клиентом, устойчивость к битому JSON, диапазон peer-зависимости), чувствительные пути и порог автономии. Общий контракт ревью — встроенный промпт бота (канон: `AI-37/docs plans/doc-bot-pr-review/reviews/_common.md`).
+- `CLAUDE.md` — указатель для ассистентов: полный контекст репозитория — в `README.md` (блок `ai37:card` ведёт docs-bot, ниже — человеческие заметки).
 - `tsup.config.ts`, `tsconfig.json`, `package.json` — конфигурация сборки и публикации.
 
 ## Публичные интерфейсы
-- npm-пакет: `@ai37/a2a-redis-task-store` (публикуемый пакет — его API является публичным контрактом).
-- API класса `RedisTaskStore` (реализует `TaskStore`): `save(task)`, `load(taskId)`, `delete`, `close`.
-- Опции конструктора (`RedisTaskStoreOptions`): `url`, `client`, `keyPrefix`, `ttlSeconds`.
+- npm-пакет: `@ai37/a2a-redis-task-store` (публикуемый пакет — его API является публичным контрактом; лицензия MIT).
+- API класса `RedisTaskStore` (реализует `TaskStore`): `save(task)`, `load(taskId)`, `delete(taskId)`, `close()`.
+- Опции конструктора (`RedisTaskStoreOptions`): `url`, `client`, `keyPrefix`, `ttlSeconds`, `logger`. Нужно передать **либо** `url`, **либо** `client` (взаимоисключающие); иначе конструктор бросает исключение.
 - HTTP/REST-эндпоинтов, A2A Agent Card, MCP, AG-UI и CLI нет — это библиотека, а не сервис.
 
 ## Зависимости в экосистеме
 ### Зависит от
 - `@a2a-js/sdk` (peerDependency `>=0.3.0`) — типы `Task`/`TaskStore`.
-- `ioredis` — клиент Redis.
+- `ioredis` — клиент Redis (ставится транзитивно).
 - Node.js 22 — рантайм для сборки/тестов (версия в CI); для unit-тестов достаточно in-memory fake.
 
 ### От него зависят
@@ -48,16 +49,17 @@ flowchart LR
 ## Конфигурация
 Параметры задаются через `RedisTaskStoreOptions` (отдельного `.env` в материалах нет):
 - `url` — строка подключения Redis: store сам создаёт `ioredis` и закрывает его в `close()`.
-- `client` — инжектированный внешний `ioredis`; `close()` становится no-op.
+- `client` — инжектированный внешний `ioredis`; `close()` становится no-op. Взаимоисключающ с `url`.
 - `keyPrefix` — префикс ключей, по умолчанию `a2a:task:`.
 - `ttlSeconds` — TTL при `SET ... EX`, по умолчанию `86400` (24 часа); `0` — запись без TTL.
+- `logger` — объект `{ warn, error }` для предупреждений (битый снапшот, ошибка соединения); по умолчанию `console`.
 
 Переменные окружения CI (GitHub Actions, переменные организации):
 - `CI_RUNNER` — JSON-массив меток раннера для CI-джобы `ci-green` (напр. `["self-hosted","ai37-local-1"]`); если не задана, используется `ubuntu-latest`.
 - `CD_RUNNER` — аналогичный выбор раннера для деплой-workflow (канон AI-37).
 
 ## Данные и хранилища
-- Redis: снапшоты `Task`, ключ `keyPrefix + task.id`, TTL по умолчанию 24 часа (защита от OOM).
+- Redis: снапшоты `Task`, ключ `keyPrefix + task.id`, TTL по умолчанию 24 часа (защита от OOM); `ttlSeconds=0` — без истечения.
 - Миграции и отдельные БД отсутствуют.
 
 ## Быстрый старт (локально)
@@ -67,6 +69,19 @@ npm run verify
 ```
 `npm run verify` выполняет `tsc --noEmit` + `vitest run` + `tsup build`. Health/smoke-эндпоинтов нет; unit-тесты работают на in-memory fake ioredis без живого Redis.
 
+Подключение как потребителя:
+```bash
+npm i @ai37/a2a-redis-task-store
+npm i @a2a-js/sdk   # peer dependency
+```
+```ts
+import { RedisTaskStore } from '@ai37/a2a-redis-task-store'
+
+const taskStore = new RedisTaskStore({ url: process.env.REDIS_URL })
+// либо с общим клиентом (store его не закроет):
+// const taskStore = new RedisTaskStore({ client: redis, keyPrefix: 'myapp:a2a:task:' })
+```
+
 ## Как запускать тесты
 ```bash
 npm test        # = vitest run
@@ -74,7 +89,7 @@ npm run verify  # полная проверка: tsc --noEmit + vitest run + tsu
 ```
 
 ## Деплой
-Публикация npm-пакета в приватный Verdaccio `npm.app-sp-ai.ru` через `.github/workflows/publish.yml` (раннер деплоя выбирается переменной `CD_RUNNER` — канон AI-37); `npm run verify` также висит на `prepublishOnly`. Потребители подключают пакет по версии.
+Публикация npm-пакета в приватный Verdaccio `npm.app-sp-ai.ru` через `.github/workflows/publish.yml` (раннер деплоя выбирается переменной `CD_RUNNER` — канон AI-37); `npm run verify` также висит на `prepublishOnly`. Потребители подключают пакет по версии. Лицензия пакета — MIT.
 
 CI: GitHub Actions `.github/workflows/ci.yml` — на каждый PR (и на `workflow_dispatch`) выполняется ОДНА джоба `ci-green` (агрегатора больше нет): `actions/checkout@v5` → `actions/setup-node@v5` (Node 22) → `npm ci` → `npm run verify`. Имя `ci-green` единое для всех репозиториев AI-37 и является обязательной проверкой ruleset. Права — `contents: read`; `concurrency` с `cancel-in-progress: true` по группе `ai37-a2a-redis-task-store-ci-<PR|ref>`.
 
@@ -85,6 +100,7 @@ CI: GitHub Actions `.github/workflows/ci.yml` — на каждый PR (и на 
 - ручной запуск (`workflow_dispatch`) позволяет явно выбрать вход `runner`: `auto`, `ubuntu-latest` или `ai37-self-hosted` (в последнем случае — `["self-hosted","ai37-local-1"]`).
 
 ## Связанные документы
+- `CLAUDE.md` — указатель на README/`ai37:card` как источник контекста репозитория.
 - `REVIEW.md` — repo-specific оверлей doc-bot PR-ревьюера (инварианты, чувствительные пути, порог автономии).
 - `ecosystem/v2.2/04-state-storage-postgres.md` — текущее место Redis-task-store и стратегия добавления PostgreSQL-реализации.
 - `ecosystem/v2.2/02-agent-host-unification.md` — durable-состояние в `task.metadata` и семантика `save`/`load`.
